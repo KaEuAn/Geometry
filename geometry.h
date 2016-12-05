@@ -2,6 +2,7 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#define PI 3.1415926535897932384626433832795
 
 
 bool approximatelyEqual (const double& a, const double& b) {
@@ -12,32 +13,15 @@ bool approximatelyEqual (const double& a, const double& b) {
     return difference < eps;
 }
 
-std::pair<short, std::pair<double, double> > solveQuadratic (double a, double b, double c) {
-    std::pair<short, std::pair<double, double> > answer;
-    double discriminant = b * b - 4 * a * c;
-    if (approximatelyEqual(discriminant, 0)) {
-        answer.first = 1;
-        answer.second.first = -b / 2 / a;
-    } else if (discriminant < 0) {
-        answer.first = 0;
-    } else {
-        discriminant = sqrt(discriminant);
-        answer.first = 2;
-        answer.second.first = (discriminant - b) / 2 / a;
-        answer.second.second = (-discriminant - b) / 2 / a;
-    }
-    return answer;
-}
-
-
 struct Point {
     double x, y;
 
-    Point (double a, double b) : x(a), y(b) {};
+    Point(double a, double b) : x(a), y(b) {};
 
-    Point () : x(0), y(0) {};
+    Point() : x(0), y(0) {};
+    Point(const Point& a) : x(a.x), y(a.y) {}
 
-    bool operator == (const Point& a) const {
+    bool operator ==(const Point& a) const {
         return (approximatelyEqual(x, a.x) && approximatelyEqual(y, a.y));
     }
 
@@ -45,8 +29,48 @@ struct Point {
         return ! (*this == a);
     }
 
-    double lengthToPoint (Point b) {
+    Point operator - (const Point& a) const {
+        Point c(*this);
+        c.x -= a.x;
+        c.y -= a.y;
+    }
+    Point operator + (const Point& a) const {
+        Point c(*this);
+        c.x += a.x;
+        c.y += a.y;
+    }
+    Point operator / (double a) const {
+        Point c(*this);
+        c.x /= a;
+        c.y /= a;
+        return c;
+    }
+
+    double angle() const {
+        return y / sqrt(x * x + y * y);
+    }
+    double length() const {
+        return lengthToPoint({0, 0});
+    }
+
+    double lengthToPoint(const Point& b) const {
         return sqrt((x - b.x) * (x - b.x) + (y - b.y) * (y - b.y));
+    }
+
+    double rotate(Point center, double angle) {
+        Point differ = *this - center;
+        double old_angle = std::asin(this->angle());
+        angle *= PI/180;
+        old_angle += angle;
+        x = std::sin(old_angle) * differ.length();
+        y = std::cos(old_angle) * differ.length();
+    }
+
+    double scalarProduct(const Point& a) const {
+        return a.length() * length() * std::cos(a.angle() - angle());
+    }
+    double pseudoScalarProduct(const Point& a) const {
+        return a.length() * length() * std::sin(a.angle() - angle());
     }
 };
 
@@ -111,7 +135,7 @@ class Shape {
 
     virtual double perimeter() const;
     virtual double area() const;
-    virtual operator==(const Shape& another) const;
+    virtual operator ==(const Shape& another) const;
     virtual isCongruentTo(const Shape& another) const;
     virtual isSimilarTo(const Shape& another) const;
     virtual containsPoint(Point point) const;*/
@@ -121,33 +145,75 @@ class Shape {
 class Polygon: public Shape {
 
 protected:
-    unsigned int quantityVertices;
-    std::vector <Point> vertices;
+    std::vector<Point> vertices;
 
-public:
-    template <class... Args>
-    Polygon (Args... args) {
-
+    void pushEl(Point a) {
+        vertices.push_back(a);
+    }
+    template<class... Args>
+    void pushEl(Point a, Args... args) {
+        vertices.push_back(a);
+        pushEl(args...);
     }
 
+public:
+    //constructors
+    template<class... Args>
+    Polygon(Args... args) {
+        pushEl(args...);
+    }
+    Polygon (std::vector<Point>& vec): vertices(vec){}
+    //
+
+    virtual ~Polygon() {};
 
     const std::vector<Point> getVertices () const {
         return vertices;
     }
-
-    unsigned int verticesCount() const {
-        return quantityVertices;
+    uint32_t verticesCount() const {
+        return vertices.size();
     }
-
     bool isConvex() const {
-        bool ans;
-
-        return ans;
+        if (verticesCount() == 3)
+            return true;
+        uint32_t vc = verticesCount();
+        for (uint32_t i = 0; i < vc; ++i) {
+            Point i1 = vertices[i];
+            Point i2 = vertices[(i + 1) % vc];
+            Point i3 = vertices[(i + 2) % vc];
+            Point i4 = vertices[(i + 3) % vc];
+            double psc1 = (i2-i1).pseudoScalarProduct(i3-i2);
+            double psc2 = (i3-i2).pseudoScalarProduct(i4-i3);
+            if ((psc1 < 0 && psc2 > 0) || (psc1 > 0 && psc2 < 0))
+                return false;
+        }
+        return true;
     }
+
+    double area() const {
+        double answer = 0;
+        for (uint32_t i = 0; i < vertices.size() - 2; ++i) {
+            Point a = vertices[i];
+            Point b = vertices[i + 1];
+            Point c = vertices[i + 2];
+            answer += (b-a).pseudoScalarProduct(c-b);
+        }
+        return std::abs(answer);
+    }
+
+    double perimeter() const {
+        double answer = 0;
+        for (uint32_t i = 0; i < vertices.size() - 1; ++i) {
+            Point a = vertices[i];
+            Point b = vertices[i + 1];
+            answer += b.lengthToPoint(a);
+        }
+        return answer;
+    }
+
 };
 
-class Rectangle: private Polygon {
-
+class Rectangle: public Polygon {
 
 public:
     Rectangle (Point a, Point b, double ratio) {
@@ -156,15 +222,32 @@ public:
         double maxSide = minSide * ratio;
         if (minSide > maxSide)
             std::swap(minSide, maxSide);
-        Circle one(a, minSide);
-        Circle two(b, maxSide);
 
     }
 
     Point center() {
-
-        return ;
+        Point answer((vertices[0].x + vertices[2].x) / 2, (vertices[0].y + vertices[2].y) / 2);
+        return answer;
     }
+
+};
+
+class Triangle: public Polygon {
+
+public:
+    Triangle(Point a, Point b, Point c): vertices(a,b,c){}
+    Point centroid() const {
+        Point sideCenter((vertices[0].x + vertices[1].x) / 2, (vertices[0].y + vertices[1].y) /2);
+        Point answer((2 * sideCenter.x + vertices[2].x) / 3, (2 * sideCenter.y + vertices[2].y) / 3);
+        return answer;
+    }
+
+    Circle ninePointsCircle() {}
+    Line EulerLine() {}
+    Point orthocenter() {}
+    Circle inscribedCircle() {}
+    Circle circumscribedCircle() {}
+
 };
 
 
@@ -172,19 +255,20 @@ class Ellipse: public Shape {
 
 protected:
     std::pair <Point, Point> _focuses;
-    double distance;
+    double semiMajorAxis;
 
 
 public:
-    Ellipse (Point a, Point b, double c): _focuses(a, b), distance(c) {}
+    Ellipse (Point a, Point b, double c): _focuses(a, b), semiMajorAxis(c / 2) {}
     Ellipse () {}
+    virtual ~Ellipse() {};
 
     const std::pair<Point, Point> focuses() const {
         return _focuses;
     };
 
     Point center () const {
-        Point x(((_focuses.first).x + (_focuses.second).x) / 2, ((_focuses.first).y + (_focuses.second).y) / 2  );
+        Point x = (_focuses.first + _focuses.second) / 2;
         return x;
     }
 
@@ -197,10 +281,24 @@ public:
         return c;
     };
 
-    double eccentricity() const {
-        double c = (_focuses.first).lengthToPoint(_focuses.second);
-        return c / distance;
+    double FocalLength() const {
+        return (_focuses.first).lengthToPoint(_focuses.second);
     }
+    double semiMinorAxis() const {
+        return sqrt(semiMajorAxis * semiMajorAxis - FocalLength() * FocalLength());
+    }
+    double eccentricity() const {
+        return FocalLength() / semiMajorAxis / 2;
+    }
+    virtual double area() const {
+        return semiMajorAxis * PI * semiMinorAxis();
+    }
+    virtual double perimeter() const {
+        double a = semiMajorAxis;
+        double b = semiMinorAxis();
+        return PI * (3 * (a + b) - sqrt( (3 * a + b) * (3 * b + a) ) );
+    }
+
 };
 
 class Circle: public Ellipse {
@@ -209,47 +307,15 @@ public:
     Circle (Point a, double b): Ellipse(a, a, b) {}
 
     double radius() {
-        return distance;
+        return semiMajorAxis;
+    }
+    double area() const {
+        return radius() * radius() * PI;
+    }
+    double perimeter() const {
+        return radius() * 2 * PI;
     }
 
-    const std::pair<short, std::pair<Point, Point> > intersectionWithLine (Line line) {
-        short count = 0;
-        // quadratic equation
-        if (! approximatelyEqual(line['b'], 0)) {
-            double quadratic_a = line['a'] * line['a'] + line['b'] * line['b'];
-            double quadratic_b = 2 * line['a'] * line['c'] - 2 * line['b'] * line['b'] * _focuses.first.x +
-                                 2 * line['b'] * _focuses.first.y;
-            double quadratic_c = line['b'] * line['b'] *
-                                 (_focuses.first.x * _focuses.first.x + _focuses.first.y * _focuses.first.y -
-                                  distance * distance) + 2 * line['b'] * +line['c'] * line['c'];
-            const std::pair<short, std::pair<double, double>> solution = solveQuadratic (quadratic_a, quadratic_b, quadratic_c);
-            std::pair<short, std::pair<Point, Point> > answer;
-            answer.first = solution.first;
-            answer.second.first.x = solution.second.first;
-            answer.second.first.y = line.getY(answer.second.first.x);
-            answer.second.second.x = solution.second.second;
-            answer.second.second.y = line.getY(answer.second.second.x);
-            return answer;
-        } else {
-            double answer_x = -line['c'] / line['a'];
-            double quadratic_a = 1;
-            double quadratic_b = _focuses.first.y * 2;
-            double quadratic_c = (answer_x - _focuses.first.x) * (answer_x - _focuses.first.x) + _focuses.first.y * _focuses.first.y - distance * distance;
-            const std::pair<short, std::pair<double, double>> solution = solveQuadratic (quadratic_a, quadratic_b, quadratic_c);
-            std::pair<short, std::pair<Point, Point> > answer;
-            answer.first = solution.first;
-            answer.second.first.x = answer_x;
-            answer.second.first.y = solution.second.first;
-            answer.second.second.x = answer_x;
-            answer.second.second.y = solution.second.second;
-            return answer;
-        }
-    };
 
-    const std::pair<short, std::pair<Point, Point> > intersectionWithCircle (Circle circle) {
-        Line line(2 * (_focuses.first.x - circle._focuses.first.x), 2 * (_focuses.first.y - circle._focuses.first.y),
-                  circle._focuses.first.x *  circle._focuses.first.x - _focuses.first.x * _focuses.first.x + circle._focuses.first.y *  circle._focuses.first.y - _focuses.first.y * _focuses.first.y + distance * distance - circle.distance * circle.distance);
-        return intersectionWithLine(line);
-    }
 };
 
